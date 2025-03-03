@@ -1,6 +1,22 @@
 # keda-poc
 
 ## Overview
+This Proof of Concept (**PoC**) demonstrates how to use **KEDA (Kubernetes Event-Driven Autoscaling)** to dynamically scale worker pods based on the number of messages in a **RabbitMQ queue**.  
+
+### **How It Works**  
+- We have a **Flask-based worker application**, which serves **two roles**:  
+  1. **Sending messages** to a RabbitMQ queue.  
+  2. **Consuming and acknowledging messages** from the queue.  
+- As the **number of messages in the queue increases**, **KEDA automatically scales up** the worker pods to handle the load.  
+- When messages are **processed (acknowledged)**, the queue size decreases, and **KEDA scales down** the worker pods accordingly.  
+
+### **Python Scripts for PoC**  
+To simulate load and test auto-scaling behavior, we have written two Python scripts:  
+
+1. **`loadgen.py`** - Sends messages to RabbitMQ continuously to increase queue size.  
+2. **`consume_faster.py`** - Consumes messages quickly to reduce queue size.  
+
+This setup ensures **efficient resource utilization** by dynamically adjusting the number of worker pods based on real-time message load in RabbitMQ.
 
 
 ## Step 1: Add and Install KEDA using Helm
