@@ -262,5 +262,59 @@ spec:
 kubectl apply -f worker.yaml
 ```
 
+## Step 5: Configure KEDA for Auto-Scaling - ScaledObjects and TriggerAuthentication
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-trigger-auth-rabbitmq
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: rabbitmq-secret
+      key: RABBITMQ_MANAGEMENT_URL
 
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-deployment-scaledobject
+spec:
+  scaleTargetRef:
+    name: worker-deployment
+  pollingInterval: 30
+  cooldownPeriod: 60
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: http
+        queueName: ^myqueue$
+        mode: QueueLength
+        value: "5"
+        useRegex: "true"
+        operation: max
+      authenticationRef:
+        name: keda-trigger-auth-rabbitmq
+```
+
+```bash
+kubectl apply -f scaledobjects.yaml
+```
+
+## Step 6: Test the KEDA autoscaling
+#### Send Messages to Increase Queue & Scale Up Pods
+```bash
+kubectl exec -it deploy/worker-deployment -- python loadgen.py
+```
+
+This will start sending messages to application, as the queue length grows, KEDA will automatically increase the number of pods accordingly.
+
+#### Consume Messages to Decrease Queue & Scale Down Pods
+```bash
+kubectl exec -it deploy/worker-deployment -- python consume_faster.py
+```
+
+This will start consuming messages from RabbitMQ, as the queue length reduces, KEDA will scale down the number of worker pods accordingly.
 
