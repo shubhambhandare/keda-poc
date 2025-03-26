@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  requirements.txt: |
+    Flask
+    pika
+  app.py: |
+    from flask import Flask
+    import pika
+    import os
+    import time
+    import threading
+
+    app = Flask(__name__)
+
+    # RabbitMQ configuration
+    rabbitmq_host = os.environ.get('RABBITMQ_HOST', 'rabbitmq')
+    rabbitmq_queue = os.environ.get('RABBITMQ_QUEUE', 'myqueue')
+
+    @app.route('/process', methods=['POST'])
+    def process_message():
+        """Processes a message by connecting to RabbitMQ and declaring a queue."""
+        try:
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=rabbitmq_host))
+            channel = connection.channel()
+            channel.queue_declare(queue=rabbitmq_queue, durable=True)
+
+            time.sleep(2)  # Simulating processing delay
+
+            return "Message processed!", 200
+        except Exception as e:
+            return f"Error: {e}", 500
+
+    def consume_messages():
+        """Consumes messages from the RabbitMQ queue in a separate thread."""
+        try:
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=rabbitmq_host))
+            channel = connection.channel()
+            channel.queue_declare(queue=rabbitmq_queue)
+
+            def callback(ch, method, properties, body):
+                print(f" [x] Received {body.decode()}")
+                time.sleep(2)  # Simulating message processing delay
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+
+            channel.basic_consume(queue=rabbitmq_queue, on_message_callback=callback)
+
+            print(' [*] Waiting for messages. To exit press CTRL+C')
+            channel.start_consuming()
+        except Exception as e:
+            print(f"Consumer error: {e}")
+
+    if __name__ == '__main__':
+        consumer_thread = threading.Thread(target=consume_messages, daemon=True)
+        consumer_thread.start()
+        app.run(debug=True, host='0.0.0.0', port=5000)
+  loadgen.py: |
+    import pika
+    import os
+    import time
+
+    RABBITMQ_HOST = os.getenv("RABBITMQ_SERVICE_HOST", "rabbitmq")
+    RABBITMQ_USER = os.getenv("RABBITMQ_USER", "user")
+    RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "password")
+    QUEUE_NAME = "myqueue"
+
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+    channel = connection.channel()
+    channel.queue_declare(queue=QUEUE_NAME)
+
+    counter = 1
+    while True:
+        message = f"Message {counter}"
+        channel.basic_publish(exchange="", routing_key=QUEUE_NAME, body=message)
+        print(f"Sent: {message}")
+        counter += 1
+        time.sleep(0.5)
+  consume_faster.py: |
+    import pika
+    import os
+    import time
+
+    RABBITMQ_HOST = os.getenv("RABBITMQ_SERVICE_HOST", "rabbitmq")
+    RABBITMQ_USER = os.getenv("RABBITMQ_USER", "user")
+    RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "password")
+    QUEUE_NAME = "myqueue"
+
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+    channel = connection.channel()
+
+    def callback(ch, method, properties, body):
+        print(f"Received: {body}")
+        ch.basic_ack(delivery_tag=method.delivery_tag)  # Acknowledge message
+        time.sleep(0.1)  # Adjust sleep time to process faster
+
+    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
+    print("Waiting for messages...")
+    channel.start_consuming()
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      initContainers:
+        - name: init-wait-for-rabbitmq
+          image: busybox
+          command: ['sh', '-c', 'until nc -z rabbitmq 5672; do echo "waiting for rabbitmq"; sleep 2; done;']
+      containers:
+        - name: worker-app
+          image: python:3.9-slim-buster
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c", "pip install -r /app/requirements.txt && python app.py"]
+          env:
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: password
+          volumeMounts:
+            - name: app-volume
+              mountPath: /app
+          workingDir: /app
+      volumes:
+        - name: app-volume
+          configMap:
+            name: app-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-service
+spec:
+  selector:
+    app: worker
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+  type: ClusterIP
