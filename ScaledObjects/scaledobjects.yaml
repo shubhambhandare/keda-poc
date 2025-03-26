@@ -1,0 +1,33 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-trigger-auth-rabbitmq
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: rabbitmq-secret
+      key: RABBITMQ_MANAGEMENT_URL
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-deployment-scaledobject
+spec:
+  scaleTargetRef:
+    name: worker-deployment
+  pollingInterval: 30
+  cooldownPeriod: 60
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: http
+        queueName: ^myqueue$
+        mode: QueueLength
+        value: "5"
+        useRegex: "true"
+        operation: max
+      authenticationRef:
+        name: keda-trigger-auth-rabbitmq
