@@ -334,3 +334,7 @@ kubectl exec -it deploy/worker-deployment -- python consume_faster.py
 
 This will start consuming messages from RabbitMQ, as the queue length reduces, KEDA will scale down the number of worker pods accordingly.
 
+#### List Queue
+```bash
+kubectl exec -it rabbitmq-6bf5b77d55-s7hfx -- rabbitmqctl list_queues
+```
